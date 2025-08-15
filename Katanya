@@ -1,0 +1,576 @@
+--[[
+    VSTAR FINAL SCRIPT v3
+    UI: 3itx-UI-LIB
+    Perubahan:
+      - Fly DIHAPUS, diganti "Swimming di udara" + slider speed
+      - Perbaikan FPS & Player Count agar realtime dan tidak macet
+      - Teleport ke player: dropdown (pilih target) + tombol "Teleport" dengan konfirmasi
+    Catatan:
+      - Jangan jalankan di tempat yang melarang; gunakan dengan tanggung jawab.
+--]]
+
+-- Load UI Library & Config Manager
+local lib = loadstring(game:HttpGet("https://raw.githubusercontent.com/Just3itx/3itx-UI-LIB/refs/heads/main/Lib"))()
+local FlagsManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/Just3itx/3itx-UI-LIB/refs/heads/main/ConfigManager"))()
+
+-- Services & Shortcuts
+local Players       = game:GetService("Players")
+local RunService    = game:GetService("RunService")
+local UserInput     = game:GetService("UserInputService")
+local TeleportService = game:GetService("TeleportService")
+local HttpService   = game:GetService("HttpService")
+local Lighting      = game:GetService("Lighting")
+
+local LocalPlayer   = Players.LocalPlayer
+
+-- Buat UI Utama
+local main = lib:Load({
+    Title = 'VSTAR',
+    ToggleButton = "RBXID or GetCustomasset",
+    BindGui = Enum.KeyCode.RightControl,
+})
+
+---------------------------------------------------------------------
+-- TAB: MAIN
+---------------------------------------------------------------------
+local TabMain = main:AddTab("MAIN")
+main:SelectTab()
+
+-----------------------------
+-- Section: Info Server
+--  - FPS realtime
+--  - Player Count realtime
+--  - Place ID statis
+-----------------------------
+local SecInfoServer = TabMain:AddSection({
+    Title = "Info Server",
+    Description = "FPS, Player Count, Place ID"
+})
+
+local fpsLabel          = SecInfoServer:AddParagraph({Title = "FPS",          Description = "0"})
+local playerCountLabel  = SecInfoServer:AddParagraph({Title = "Player Count", Description = "0"})
+local placeIdLabel      = SecInfoServer:AddParagraph({Title = "Place ID",     Description = tostring(game.PlaceId)})
+
+-- Perbaikan kalkulasi FPS: hitung delta time antar frame (tanpa :Wait())
+local lastTime = os.clock()
+RunService.RenderStepped:Connect(function()
+    local now = os.clock()
+    local dt = now - lastTime
+    lastTime = now
+    local fps = dt > 0 and math.floor(1/dt) or 0
+    fpsLabel:SetDescription(tostring(fps))
+
+    -- Update jumlah pemain realtime
+    playerCountLabel:SetDescription(tostring(#Players:GetPlayers()))
+end)
+
+-----------------------------
+-- Section: Anti AFK (Toggle)
+--  - Mencegah kick AFK dengan VirtualUser click
+--  - Toggle ON/OFF, koneksi dibersihkan saat OFF
+-----------------------------
+local SecAntiAFK = TabMain:AddSection({
+    Title = "Anti AFK",
+    Description = "Cegah kick karena idle"
+})
+
+local antiAFKConnection
+SecAntiAFK:AddToggle("AntiAFKToggle", {
+    Title = "Anti AFK",
+    Default = false,
+    Callback = function(state)
+        if state then
+            if not antiAFKConnection then
+                antiAFKConnection = LocalPlayer.Idled:Connect(function()
+                    local vu = game:GetService("VirtualUser")
+                    vu:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+                    task.wait(1)
+                    vu:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+                end)
+            end
+            lib:Notification("VSTAR", "Anti AFK Enabled!", 2)
+        else
+            if antiAFKConnection then
+                antiAFKConnection:Disconnect()
+                antiAFKConnection = nil
+            end
+            lib:Notification("VSTAR", "Anti AFK Disabled!", 2)
+        end
+    end
+})
+
+---------------------------------------------------------------------
+-- TAB: PLAYER
+---------------------------------------------------------------------
+local TabPlayer = main:AddTab("PLAYER")
+
+-----------------------------
+-- Section: Movement
+--  - Walk Speed (toggle + slider 0-200)
+--  - High Jump  (toggle + slider 0-300)
+--  - Infinite Jump (toggle)
+-----------------------------
+local SecMovement = TabPlayer:AddSection({ Title = "Movement" })
+
+-- Walk Speed
+local wsToggle, wsValue = false, 16
+SecMovement:AddToggle("WalkSpeedToggle", {
+    Title = "Walk Speed",
+    Default = false,
+    Callback = function(v) wsToggle = v end
+})
+SecMovement:AddSlider("WalkSpeedValue", {
+    Title = "Walk Speed Value",
+    Min = 0, Max = 200, Default = 16,
+    Callback = function(val) wsValue = val end
+})
+RunService.Stepped:Connect(function()
+    local char = LocalPlayer.Character
+    if wsToggle and char and char:FindFirstChildOfClass("Humanoid") then
+        char:FindFirstChildOfClass("Humanoid").WalkSpeed = wsValue
+    end
+end)
+
+-- High Jump
+local hjToggle, hjValue = false, 50
+SecMovement:AddToggle("HighJumpToggle", {
+    Title = "High Jump",
+    Default = false,
+    Callback = function(v) hjToggle = v end
+})
+SecMovement:AddSlider("HighJumpValue", {
+    Title = "High Jump Power",
+    Min = 0, Max = 300, Default = 50,
+    Callback = function(val) hjValue = val end
+})
+RunService.Stepped:Connect(function()
+    local char = LocalPlayer.Character
+    if hjToggle and char and char:FindFirstChildOfClass("Humanoid") then
+        char:FindFirstChildOfClass("Humanoid").JumpPower = hjValue
+    end
+end)
+
+-- Infinite Jump
+local infJump = false
+SecMovement:AddToggle("InfiniteJump", {
+    Title = "Infinite Jump",
+    Default = false,
+    Callback = function(v) infJump = v end
+})
+UserInput.JumpRequest:Connect(function()
+    local char = LocalPlayer.Character
+    if infJump and char then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+    end
+end)
+
+-----------------------------
+-- Section: Mode
+--  - No Clip (toggle)
+--  - No Fall Damage (toggle)
+--  - Godmode (toggle)
+--  - Swimming di udara (toggle + slider speed)
+-----------------------------
+local SecMode = TabPlayer:AddSection({ Title = "Mode" })
+
+-- No Clip: paksa semua BasePart karakter non-collide saat aktif
+local noclip = false
+SecMode:AddToggle("NoClip", {
+    Title = "No Clip",
+    Default = false,
+    Callback = function(v) noclip = v end
+})
+RunService.Stepped:Connect(function()
+    if noclip then
+        local char = LocalPlayer.Character
+        if char then
+            for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") and part.CanCollide then
+                    part.CanCollide = false
+                end
+            end
+        end
+    end
+end)
+
+-- No Fall Damage (sederhana): ubah state saat Freefall agar tidak menerima damage di beberapa game
+SecMode:AddToggle("NoFallDamage", {
+    Title = "No Fall Damage",
+    Default = false,
+    Callback = function(v)
+        local char = LocalPlayer.Character
+        if v and char and char:FindFirstChildOfClass("Humanoid") then
+            -- Catatan: banyak game punya sistem damage custom; ini pendekatan generik.
+            char:FindFirstChildOfClass("Humanoid").StateChanged:Connect(function(_, new)
+                if new == Enum.HumanoidStateType.Freefall then
+                    char:FindFirstChildOfClass("Humanoid"):ChangeState(Enum.HumanoidStateType.Seated)
+                end
+            end)
+        end
+    end
+})
+
+-- Godmode (generik): set Health/MaxHealth ke nilai sangat besar
+SecMode:AddToggle("Godmode", {
+    Title = "Godmode",
+    Default = false,
+    Callback = function(v)
+        local char = LocalPlayer.Character
+        if v and char and char:FindFirstChildOfClass("Humanoid") then
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            hum.MaxHealth = math.huge
+            hum.Health = math.huge
+        end
+    end
+})
+
+-- Swimming di udara:
+--  Membuat Humanoid selalu berada pada state "Swimming" meski di udara.
+--  Kontrol arah pakai WASD relatif kamera, kecepatan dapat diatur melalui slider.
+local swimAirEnabled = false
+local swimSpeed = 50
+local camera = workspace.CurrentCamera
+local HRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+
+LocalPlayer.CharacterAdded:Connect(function(char)
+    HRP = char:WaitForChild("HumanoidRootPart")
+end)
+
+-- Loop kontrol swimming di udara
+RunService.RenderStepped:Connect(function()
+    if swimAirEnabled and HRP then
+        local hum = HRP.Parent and HRP.Parent:FindFirstChildOfClass("Humanoid")
+        if hum then
+            -- Paksa state Swimming
+            if hum:GetState() ~= Enum.HumanoidStateType.Swimming then
+                hum:ChangeState(Enum.HumanoidStateType.Swimming)
+            end
+
+            -- Arah gerak relatif kamera (WASD)
+            local move = Vector3.zero
+            if UserInput:IsKeyDown(Enum.KeyCode.W) then move += camera.CFrame.LookVector end
+            if UserInput:IsKeyDown(Enum.KeyCode.S) then move -= camera.CFrame.LookVector end
+            if UserInput:IsKeyDown(Enum.KeyCode.A) then move -= camera.CFrame.RightVector end
+            if UserInput:IsKeyDown(Enum.KeyCode.D) then move += camera.CFrame.RightVector end
+
+            -- Normalisasi & set kecepatan
+            if move.Magnitude > 0 then
+                move = move.Unit * swimSpeed
+            end
+
+            -- Terapkan kecepatan ke HRP (gunakan AssemblyLinearVelocity agar smooth)
+            HRP.AssemblyLinearVelocity = Vector3.new(move.X, HRP.AssemblyLinearVelocity.Y, move.Z)
+        end
+    end
+end)
+
+-- Toggle Swimming di udara
+SecMode:AddToggle("SwimAirToggle", {
+    Title = "Swim in Air",
+    Default = false,
+    Callback = function(v)
+        swimAirEnabled = v
+        if not v and HRP then
+            -- Reset XZ velocity saat dimatikan
+            local vel = HRP.AssemblyLinearVelocity
+            HRP.AssemblyLinearVelocity = Vector3.new(0, vel.Y, 0)
+        end
+    end
+})
+
+-- Slider kecepatan renang di udara
+SecMode:AddSlider("SwimAirSpeed", {
+    Title = "Swim Speed",
+    Min = 10, Max = 200, Default = 50,
+    Callback = function(val) swimSpeed = val end
+})
+
+---------------------------------------------------------------------
+-- TAB: MISC
+---------------------------------------------------------------------
+local TabMisc = main:AddTab("MISC")
+
+-----------------------------
+-- Section: Teleport
+--  - Pilih target via dropdown (tidak teleport otomatis)
+--  - Tombol "Teleport to Player" -> popup konfirmasi Yes/No
+--  - Tombol "Refresh Player List" untuk update daftar
+-----------------------------
+local SecTeleport = TabMisc:AddSection({ Title = "Teleport" })
+
+local selectedPlayer = nil
+local playerList = {}
+
+local function buildPlayerList()
+    table.clear(playerList)
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then
+            table.insert(playerList, p.Name)
+        end
+    end
+end
+buildPlayerList()
+
+-- Dropdown pilih player (hanya memilih, tidak teleport)
+SecTeleport:AddDropdown("SelectTeleportPlayer", {
+    Title = "Select Player",
+    Options = playerList,
+    Callback = function(name)
+        selectedPlayer = name
+    end
+})
+
+-- Tombol refresh
+SecTeleport:AddButton({
+    Title = "Refresh Player List",
+    Callback = function()
+        buildPlayerList()
+        lib:Notification("VSTAR", "Player list refreshed!", 2)
+    end
+})
+
+-- Tombol teleport (dengan konfirmasi)
+SecTeleport:AddButton({
+    Title = "Teleport to Player",
+    Callback = function()
+        if not selectedPlayer then
+            lib:Notification("VSTAR", "No player selected!", 2)
+            return
+        end
+        local target = Players:FindFirstChild(selectedPlayer)
+        if not (target and target.Character and target.Character:FindFirstChild("HumanoidRootPart")) then
+            lib:Notification("VSTAR", "Player not found!", 2)
+            return
+        end
+        lib:Dialog({
+            Title = "Confirm Teleport",
+            Content = "Teleport to "..selectedPlayer.."?",
+            Buttons = {
+                {
+                    Title = "Yes",
+                    Variant = "Primary",
+                    Callback = function()
+                        local hrp = target.Character:FindFirstChild("HumanoidRootPart")
+                        if hrp and LocalPlayer.Character then
+                            LocalPlayer.Character:PivotTo(hrp.CFrame)
+                            lib:Notification("VSTAR", "Teleported to "..selectedPlayer, 2)
+                        else
+                            lib:Notification("VSTAR", "Target not available!", 2)
+                        end
+                    end
+                },
+                {
+                    Title = "No",
+                    Variant = "Ghost",
+                    Callback = function()
+                        lib:Notification("VSTAR", "Teleport cancelled", 2)
+                    end
+                }
+            }
+        })
+    end
+})
+
+-----------------------------
+-- Section: Other
+--  - Chat Spy (print chat semua pemain ke console)
+--  - ESP (Highlight pemain lain)
+--  - Full Bright (paksa terang)
+-----------------------------
+local SecOther = TabMisc:AddSection({ Title = "Other" })
+
+-- Chat Spy
+SecOther:AddToggle("ChatSpy", {
+    Title = "Chat Spy",
+    Default = false,
+    Callback = function(state)
+        if state then
+            for _, p in ipairs(Players:GetPlayers()) do
+                p.Chatted:Connect(function(msg)
+                    print("[CHAT SPY] " .. p.Name .. ": " .. msg)
+                end)
+            end
+            lib:Notification("VSTAR", "Chat Spy ON (lihat output console)", 3)
+        else
+            lib:Notification("VSTAR", "Chat Spy OFF (koneksi lama tidak dibersihkan)", 3)
+            -- Catatan: UI lib ini tidak melacak koneksi; untuk versi lanjut,
+            -- simpan semua RBXSignal dari Chatted dan Disconnect saat OFF.
+        end
+    end
+})
+
+-- ESP
+local function createESP(player)
+    if player == LocalPlayer then return end
+    if player.Character and not player.Character:FindFirstChild("VSTAR_ESP") then
+        local highlight = Instance.new("Highlight")
+        highlight.Name = "VSTAR_ESP"
+        highlight.Adornee = player.Character
+        highlight.FillColor = Color3.fromRGB(255, 0, 0)
+        highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+        highlight.Parent = player.Character
+    end
+end
+local function removeESP(player)
+    if player.Character and player.Character:FindFirstChild("VSTAR_ESP") then
+        player.Character.VSTAR_ESP:Destroy()
+    end
+end
+SecOther:AddToggle("ESP", {
+    Title = "ESP",
+    Default = false,
+    Callback = function(state)
+        for _, p in ipairs(Players:GetPlayers()) do
+            if state then createESP(p) else removeESP(p) end
+        end
+    end
+})
+
+-- Full Bright
+local normalBrightness = Lighting.Brightness
+local normalClockTime = Lighting.ClockTime
+local normalFogEnd = Lighting.FogEnd
+local normalAmbient = Lighting.Ambient
+
+SecOther:AddToggle("FullBright", {
+    Title = "Full Bright",
+    Default = false,
+    Callback = function(state)
+        if state then
+            Lighting.Brightness = 2
+            Lighting.ClockTime = 14
+            Lighting.FogEnd = 100000
+            Lighting.Ambient = Color3.fromRGB(255, 255, 255)
+            -- Optional guard: kalau map ubah lighting, paksa balik:
+            if not _G.__VSTAR_FB_guard then
+                _G.__VSTAR_FB_guard = Lighting.Changed:Connect(function(prop)
+                    if prop == "Brightness" or prop == "ClockTime" or prop == "FogEnd" or prop == "Ambient" then
+                        if state then
+                            Lighting.Brightness = 2
+                            Lighting.ClockTime = 14
+                            Lighting.FogEnd = 100000
+                            Lighting.Ambient = Color3.fromRGB(255, 255, 255)
+                        end
+                    end
+                end)
+            end
+        else
+            Lighting.Brightness = normalBrightness
+            Lighting.ClockTime = normalClockTime
+            Lighting.FogEnd = normalFogEnd
+            Lighting.Ambient = normalAmbient
+            if _G.__VSTAR_FB_guard then
+                _G.__VSTAR_FB_guard:Disconnect()
+                _G.__VSTAR_FB_guard = nil
+            end
+        end
+    end
+})
+
+---------------------------------------------------------------------
+-- TAB: SERVER
+---------------------------------------------------------------------
+local TabServer = main:AddTab("SERVER")
+local SecServerControl = TabServer:AddSection({
+    Title = "Server Control",
+    Description = "Auto Reconnect, Rejoin, Hop, Copy JobId, Join via ID"
+})
+
+-- Auto Reconnect: teleport ulang jika gagal/keluar (generik)
+local autoReconnectConn
+SecServerControl:AddToggle("AutoReconnect", {
+    Title = "Auto Reconnect",
+    Default = false,
+    Callback = function(v)
+        if v then
+            if not autoReconnectConn then
+                autoReconnectConn = LocalPlayer.OnTeleport:Connect(function(state)
+                    if state == Enum.TeleportState.Failed then
+                        TeleportService:Teleport(game.PlaceId, LocalPlayer)
+                    end
+                end)
+            end
+            lib:Notification("VSTAR", "Auto Reconnect ON", 2)
+        else
+            if autoReconnectConn then
+                autoReconnectConn:Disconnect()
+                autoReconnectConn = nil
+            end
+            lib:Notification("VSTAR", "Auto Reconnect OFF", 2)
+        end
+    end
+})
+
+-- Rejoin
+SecServerControl:AddButton({
+    Title = "Rejoin",
+    Callback = function()
+        TeleportService:Teleport(game.PlaceId, LocalPlayer)
+    end
+})
+
+-- Hop Server (cari server publik lain di place yang sama)
+SecServerControl:AddButton({
+    Title = "Hop Server",
+    Callback = function()
+        local ok, res = pcall(function()
+            return HttpService:JSONDecode(game:HttpGet(
+                ("https://games.roblox.com/v1/games/%s/servers/Public?sortOrder=Asc&limit=100"):format(game.PlaceId)
+            ))
+        end)
+        if not ok or not res or not res.data then
+            lib:Notification("VSTAR", "Gagal ambil daftar server", 3)
+            return
+        end
+        for _, srv in ipairs(res.data) do
+            if srv.id ~= game.JobId and srv.playing < srv.maxPlayers then
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, srv.id, LocalPlayer)
+                return
+            end
+        end
+        lib:Notification("VSTAR", "Tidak ada server tersedia", 3)
+    end
+})
+
+-- Copy Server ID (JobId)
+SecServerControl:AddButton({
+    Title = "Copy Server ID",
+    Callback = function()
+        if setclipboard then
+            setclipboard(game.JobId)
+            lib:Notification("VSTAR", "Server ID copied!", 2)
+        else
+            lib:Notification("VSTAR", "setclipboard tidak tersedia", 2)
+        end
+    end
+})
+
+-- Join via Server ID
+SecServerControl:AddTextbox({
+    Title = "Join via Server ID",
+    Default = "",
+    PlaceHolder = "Masukkan JobId",
+    TextDisappear = false,
+    Callback = function(id)
+        if typeof(id) == "string" and #id > 0 then
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, id, LocalPlayer)
+        else
+            lib:Notification("VSTAR", "JobId tidak valid", 2)
+        end
+    end
+})
+
+---------------------------------------------------------------------
+-- TAB: CONFIG (Save/Load)
+---------------------------------------------------------------------
+local TabConfig = main:AddTab("CONFIG")
+FlagsManager:SetLibrary(lib)
+FlagsManager:SetIgnoreIndexes({})
+FlagsManager:SetFolder("Config/VSTAR")
+FlagsManager:InitSaveSystem(TabConfig)
+
+---------------------------------------------------------------------
+-- Notifikasi Awal
+---------------------------------------------------------------------
+lib:Notification('VSTAR', 'Thanks for using VSTAR!', 3)
