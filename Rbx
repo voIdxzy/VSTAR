@@ -1,0 +1,321 @@
+-- Load Library
+local lib = loadstring(game:HttpGet("https://raw.githubusercontent.com/Just3itx/3itx-UI-LIB/refs/heads/main/Lib"))()
+local FlagsManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/Just3itx/3itx-UI-LIB/refs/heads/main/ConfigManager"))()
+
+-- Load UI
+local main = lib:Load({
+    Title = 'VSTAR',
+    ToggleButton = "RBXID or GetCustomasset",
+    BindGui = Enum.KeyCode.RightControl,
+})
+
+-- =========================================
+-- TAB: MAIN
+-- =========================================
+local MainTab = main:AddTab("MAIN")
+
+-- Section Info Server
+local InfoSection = MainTab:AddSection({Title = "Info Server"})
+local startTime = tick()
+local fps = 0
+local RunService = game:GetService("RunService")
+
+-- Paragraph for info server
+local infoParagraph = InfoSection:AddParagraph({Title = "Server Info", Description = ""})
+
+-- Update loop
+RunService.RenderStepped:Connect(function(deltaTime)
+    fps = 1/deltaTime
+    local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue()
+    local playtime = tick() - startTime
+    local hours = math.floor(playtime/3600)
+    local minutes = math.floor((playtime%3600)/60)
+    local seconds = math.floor(playtime%60)
+    local placeName = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name
+    infoParagraph:SetDescription(string.format(
+        "FPS: %d\nPing: %d ms\nPlaytime: %02d:%02d:%02d\nPlace ID: %d\nPlace Name: %s",
+        fps, ping, hours, minutes, seconds, game.PlaceId, placeName
+    ))
+end)
+
+-- Section Other (Anti AFK)
+local OtherSectionMain = MainTab:AddSection({Title = "Other"})
+OtherSectionMain:AddToggle("AntiAFK", {
+    Title = "Anti AFK",
+    Default = true,
+    Callback = function(value)
+        if value then
+            local vu = game:GetService("VirtualUser")
+            game:GetService("Players").LocalPlayer.Idled:Connect(function()
+                vu:Button2Down(Vector2.new(0,0),workspace.CurrentCamera.CFrame)
+                wait(1)
+                vu:Button2Up(Vector2.new(0,0),workspace.CurrentCamera.CFrame)
+            end)
+        end
+    end
+})
+
+-- =========================================
+-- TAB: PLAYER
+-- =========================================
+local PlayerTab = main:AddTab("PLAYER")
+
+-- Movement Section
+local MoveSection = PlayerTab:AddSection({Title = "Movement"})
+local plr = game.Players.LocalPlayer
+local character = plr.Character or plr.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+
+-- Walk Speed
+MoveSection:AddSlider("WalkSpeedSlider", {
+    Title = "Walk Speed",
+    Default = 16,
+    Min = 16,
+    Max = 500,
+    Increment = 1,
+    Callback = function(val)
+        humanoid.WalkSpeed = val
+    end,
+})
+MoveSection:AddToggle("WalkSpeedToggle", {
+    Title = "Enable Walk Speed",
+    Default = false,
+    Callback = function(val)
+        if val then
+            humanoid.WalkSpeed = FlagsManager.Flags["WalkSpeedSlider"]
+        else
+            humanoid.WalkSpeed = 16
+        end
+    end,
+})
+
+-- High Jump
+MoveSection:AddSlider("HighJumpSlider", {
+    Title = "High Jump",
+    Default = 50,
+    Min = 50,
+    Max = 500,
+    Increment = 1,
+    Callback = function(val)
+        humanoid.JumpPower = val
+    end,
+})
+MoveSection:AddToggle("HighJumpToggle", {
+    Title = "Enable High Jump",
+    Default = false,
+    Callback = function(val)
+        if val then
+            humanoid.JumpPower = FlagsManager.Flags["HighJumpSlider"]
+        else
+            humanoid.JumpPower = 50
+        end
+    end,
+})
+
+-- Infinite Jump
+MoveSection:AddToggle("InfiniteJump", {
+    Title = "Infinite Jump",
+    Default = false,
+    Callback = function(val)
+        if val then
+            game:GetService("UserInputService").JumpRequest:Connect(function()
+                humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+            end)
+        end
+    end,
+})
+
+-- Mode Section
+local ModeSection = PlayerTab:AddSection({Title = "Mode"})
+
+-- No Fall Damage
+ModeSection:AddToggle("NoFallDamage", {
+    Title = "No Fall Damage",
+    Default = false,
+    Callback = function(val)
+        if val then
+            humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown,false)
+        else
+            humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown,true)
+        end
+    end,
+})
+
+-- God Mode (simple)
+ModeSection:AddToggle("GodMode", {
+    Title = "God Mode",
+    Default = false,
+    Callback = function(val)
+        if val then
+            humanoid.Health = math.huge
+        end
+    end,
+})
+
+-- No Clip
+ModeSection:AddToggle("NoClip", {
+    Title = "No Clip",
+    Default = false,
+    Callback = function(val)
+        RunService.Stepped:Connect(function()
+            if val then
+                for _, part in pairs(character:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        part.CanCollide = false
+                    end
+                end
+            else
+                for _, part in pairs(character:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        part.CanCollide = true
+                    end
+                end
+            end
+        end)
+    end,
+})
+
+-- Invisible
+ModeSection:AddToggle("Invisible", {
+    Title = "Invisible",
+    Default = false,
+    Callback = function(val)
+        for _, part in pairs(character:GetDescendants()) do
+            if part:IsA("BasePart") or part:IsA("Decal") then
+                part.Transparency = val and 1 or 0
+            end
+        end
+    end,
+})
+
+-- =========================================
+-- TAB: MISC
+-- =========================================
+local MiscTab = main:AddTab("MISC")
+
+-- Teleport Section
+local TeleportSection = MiscTab:AddSection({Title = "Teleport"})
+local players = game:GetService("Players")
+
+local function RefreshPlayerList()
+    local plrNames = {}
+    for _, p in pairs(players:GetPlayers()) do
+        table.insert(plrNames, p.Name)
+    end
+    return plrNames
+end
+
+TeleportSection:AddDropdown("TeleportToPlayer", {
+    Title = "Teleport to Player",
+    Options = RefreshPlayerList(),
+    Multiple = false,
+    Callback = function(selected)
+        local target = players:FindFirstChild(selected)
+        if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
+            character.HumanoidRootPart.CFrame = target.Character.HumanoidRootPart.CFrame
+        end
+    end
+})
+
+TeleportSection:AddButton({
+    Title = "Refresh List",
+    Callback = function()
+        FlagsManager.Flags["TeleportToPlayer"].Options = RefreshPlayerList()
+    end
+})
+
+-- Waypoint Section
+local WaypointSection = MiscTab:AddSection({Title = "Waypoint"})
+local waypoints = {}
+
+WaypointSection:AddButton({
+    Title = "Save Current Location",
+    Callback = function()
+        if character and character:FindFirstChild("HumanoidRootPart") then
+            table.insert(waypoints, character.HumanoidRootPart.CFrame)
+            print("Waypoint saved!")
+        end
+    end
+})
+
+WaypointSection:AddDropdown("WaypointList", {
+    Title = "Teleport to Waypoint",
+    Options = {},
+    Multiple = false,
+    Callback = function(selected)
+        local idx = tonumber(selected)
+        if character and waypoints[idx] then
+            character.HumanoidRootPart.CFrame = waypoints[idx]
+        end
+    end
+})
+
+WaypointSection:AddButton({
+    Title = "Delete Selected Waypoint",
+    Callback = function()
+        local selected = tonumber(FlagsManager.Flags["WaypointList"])
+        if selected then
+            waypoints[selected] = nil
+            print("Waypoint deleted!")
+        end
+    end
+})
+
+-- Other Section
+local OtherSectionMisc = MiscTab:AddSection({Title = "Other"})
+
+OtherSectionMisc:AddToggle("ESP", {
+    Title = "ESP",
+    Default = false,
+    Callback = function(val)
+        print("ESP Toggled:", val) -- Implement ESP logic sesuai game
+    end
+})
+
+OtherSectionMisc:AddToggle("FullBright", {
+    Title = "Full Bright",
+    Default = false,
+    Callback = function(val)
+        if val then
+            game:GetService("Lighting").Brightness = 2
+        else
+            game:GetService("Lighting").Brightness = 1
+        end
+    end
+})
+
+OtherSectionMisc:AddButton({
+    Title = "B-Tools",
+    Callback = function()
+        print("B-Tools activated") -- Implement sesuai kebutuhan
+    end
+})
+
+OtherSectionMisc:AddToggle("ChatSpy", {
+    Title = "Chat Spy",
+    Default = false,
+    Callback = function(val)
+        print("Chat Spy:", val) -- Implement sesuai game
+    end
+})
+
+-- =========================================
+-- TAB: SERVER
+-- =========================================
+local ServerTab = main:AddTab("SERVER")
+
+ServerTab:AddButton({Title = "Rejoin Server", Callback = function() print("Rejoin") end})
+ServerTab:AddButton({Title = "Server Hop", Callback = function() print("Hop") end})
+ServerTab:AddButton({Title = "Copy Server ID", Callback = function() print("Copy") end})
+ServerTab:AddTextbox({Title = "Join via Server ID", Default = "", Callback = function(val) print("Join ID:", val) end})
+
+-- =========================================
+-- Config
+-- =========================================
+FlagsManager:SetLibrary(lib)
+FlagsManager:SetIgnoreIndexes({})
+FlagsManager:SetFolder("Config/VSTAR")
+FlagsManager:InitSaveSystem(main)
+
+-- Notification
+lib:Notification('Hello', 'Welcome to VSTAR UI', 3)
