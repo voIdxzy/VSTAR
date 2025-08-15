@@ -1,0 +1,214 @@
+--[[ VSTAR Dev Toolkit (safe-for-your-own-place)
+
+⚠️ Catatan Penting
+
+Skrip ini ditujukan untuk pengujian di game milikmu sendiri (Roblox Studio / private place).
+
+Fitur yang bersifat kecurangan di server publik (ESP, auto tembak/aim, anti-AFK untuk mengakali) TIDAK disediakan.
+
+Gunakan dengan tanggung jawab dan patuhi ToS Roblox.
+
+
+Struktur Tab & Section:
+
+MAIN     > Info Server, Anti AFK (placeholder aman)
+
+PLAYER   > Movement, Mode (dev-only)
+
+MISC     > Teleport, Waypoint, Other (Chat Spy placeholder)
+
+COMBAT   > Auto (placeholder), Esp (placeholder), Other (Full Bright)
+
+SERVER   > Server Control (Rejoin/Hop/Copy/Join via ID)
+
+Config   > Configuration (Save/Load) ]]
+
+
+--// Services local Players = game:GetService("Players") local RunService = game:GetService("RunService") local UserInputService = game:GetService("UserInputService") local TeleportService = game:GetService("TeleportService") local StarterGui = game:GetService("StarterGui") local MarketplaceService = game:GetService("MarketplaceService") local HttpService = game:GetService("HttpService") local Lighting = game:GetService("Lighting")
+
+local LocalPlayer = Players.LocalPlayer
+
+--// Library load local lib = loadstring(game:HttpGet("https://raw.githubusercontent.com/Just3itx/3itx-UI-LIB/refs/heads/main/Lib"))() local FlagsManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/Just3itx/3itx-UI-LIB/refs/heads/main/ConfigManager"))()
+
+--// Helpers local function notify(title, text, dur) pcall(function() lib:Notification(title, text, dur or 3) end) end
+
+local function isDevPlace() -- anggap aman jika di Studio atau kamu pemilik place local okStudio = pcall(function() return RunService:IsStudio() end) local studio = okStudio and RunService:IsStudio() local ownerId = game.CreatorId return studio or (ownerId ~= 0 and LocalPlayer and LocalPlayer.UserId == ownerId) end
+
+local function getCharacter() local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait() return char end
+
+local function getHumanoid() local char = getCharacter() return char:FindFirstChildOfClass("Humanoid") end
+
+local function getHRP() local char = getCharacter() return char:FindFirstChild("HumanoidRootPart") end
+
+--// UI Load local main = lib:Load({ Title = 'VSTAR', ToggleButton = "RBXID or GetCustomasset", BindGui = Enum.KeyCode.RightControl, })
+
+-- Tabs local TabMain   = main:AddTab("MAIN") local TabPlayer = main:AddTab("PLAYER") local TabMisc   = main:AddTab("MISC") local TabCombat = main:AddTab("COMBAT") local TabServer = main:AddTab("SERVER") local TabConfig = main:AddTab("Config")
+
+main:SelectTab(TabMain)
+
+
+---
+
+-- MAIN > Info Server
+
+local SecInfo = TabMain:AddSection({Title = "Info Server", Description = "", Defualt = false, Locked = false})
+
+-- Info paragraphs (akan diupdate realtime) local PlaceName = "(fetching...)" local PlaceId = game.PlaceId pcall(function() local info = MarketplaceService:GetProductInfo(PlaceId) PlaceName = info and info.Name or "Unknown" end)
+
+local joinTime = os.clock()
+
+local fpsVal = 0 local fpsAccum, fpsCount, lastFpsUpdate = 0, 0, os.clock()
+
+local pFPS = SecInfo:AddParagraph({Title = "FPS", Description = "0"}) local pPlayers = SecInfo:AddParagraph({Title = "Player Count", Description = tostring(#Players:GetPlayers())}) local pDuration = SecInfo:AddParagraph({Title = "Durasi sejak join", Description = "0s"}) local pPlaceName = SecInfo:AddParagraph({Title = "Place Name", Description = PlaceName}) local pPlaceId = SecInfo:AddParagraph({Title = "Place ID", Description = tostring(PlaceId)})
+
+-- Update player count on join/leave Players.PlayerAdded:Connect(function() pPlayers:Update({Title = "Player Count", Description = tostring(#Players:GetPlayers())}) end) Players.PlayerRemoving:Connect(function() pPlayers:Update({Title = "Player Count", Description = tostring(#Players:GetPlayers())}) end)
+
+-- Realtime updater RunService.RenderStepped:Connect(function(dt) -- FPS smoothing fpsAccum += 1/dt fpsCount += 1 if os.clock() - lastFpsUpdate >= 0.25 then -- update 4x/detik fpsVal = math.floor((fpsAccum / math.max(1, fpsCount))) fpsAccum, fpsCount = 0, 0 lastFpsUpdate = os.clock() pFPS:Update({Title = "FPS", Description = tostring(fpsVal)}) end
+
+local elapsed = os.clock() - joinTime
+local mins = math.floor(elapsed/60)
+local secs = math.floor(elapsed % 60)
+local hrs = math.floor(mins/60)
+mins = mins % 60
+local durText = string.format("%02d:%02d:%02d", hrs, mins, secs)
+pDuration:Update({Title = "Durasi sejak join", Description = durText})
+
+end)
+
+
+---
+
+-- MAIN > Anti AFK (placeholder aman)
+
+local SecAFK = TabMain:AddSection({Title = "Anti AFK", Description = "Hanya untuk pengujian di tempatmu sendiri.", Defualt = false, Locked = false}) SecAFK:AddParagraph({Title = "Catatan", Description = "Mengakali sistem AFK di server publik dilarang. Gunakan hanya untuk test di tempatmu sendiri."}) -- Jika benar-benar membutuhkan di tempat sendiri, kamu bisa menjalankan mekanisme gerak kecil tiap beberapa menit. -- (Tidak disertakan di sini untuk mencegah penyalahgunaan.)
+
+
+---
+
+-- PLAYER > Movement
+
+local SecMove = TabPlayer:AddSection({Title = "Movement", Description = "Dev-only in your own place", Defualt = false, Locked = false})
+
+-- WalkSpeed local WalkSpeedOn = false local WalkSpeedVal = 16
+
+SecMove:AddToggle("VSTAR_WalkSpeed_Enable", { Title = "Walk Speed", Default = false, Description = "Aktifkan override WalkSpeed", Callback = function(on) WalkSpeedOn = on local hum = getHumanoid() if hum then if on then hum.WalkSpeed = WalkSpeedVal else hum.WalkSpeed = 16 end end end, })
+
+SecMove:AddSlider("VSTAR_WalkSpeed_Value", { Title = "Walk Speed Value", Description = "0 - 200", Default = 16, Min = 0, Max = 200, Increment = 1, Callback = function(val) WalkSpeedVal = val if WalkSpeedOn then local hum = getHumanoid(); if hum then hum.WalkSpeed = WalkSpeedVal end end end, })
+
+-- High Jump via JumpPower local HighJumpOn = false local HighJumpVal = 50
+
+SecMove:AddToggle("VSTAR_HighJump_Enable", { Title = "High Jump", Default = false, Description = "Override JumpPower", Callback = function(on) HighJumpOn = on local hum = getHumanoid() if hum then pcall(function() hum.UseJumpPower = true end) if on then hum.JumpPower = HighJumpVal else hum.JumpPower = 50 end end end, })
+
+SecMove:AddSlider("VSTAR_HighJump_Value", { Title = "High Jump Value", Description = "0 - 300", Default = 50, Min = 0, Max = 300, Increment = 1, Callback = function(val) HighJumpVal = val if HighJumpOn then local hum = getHumanoid(); if hum then hum.JumpPower = HighJumpVal end end end, })
+
+-- Infinite Jump (client-side) local InfiniteJump = false SecMove:AddToggle("VSTAR_InfiniteJump", { Title = "Infinite Jump", Default = false, Description = "Loncat tanpa batas (untuk test)", Callback = function(on) InfiniteJump = on end, })
+
+UserInputService.JumpRequest:Connect(function() if InfiniteJump then local hum = getHumanoid() if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end end end)
+
+
+---
+
+-- PLAYER > Mode (dev-only)
+
+local SecMode = TabPlayer:AddSection({Title = "Mode", Description = "Aktif jika isDevPlace() = true", Defualt = false, Locked = false})
+
+local function devGuard(action) if not isDevPlace() then notify('VSTAR', 'Fitur ini hanya untuk tempat milikmu sendiri.', 4) return false end return true end
+
+-- No Clip local NoClipOn = false SecMode:AddToggle("VSTAR_NoClip", { Title = "No Clip (Dev)", Default = false, Description = "Nonaktifkan collision karakter", Callback = function(on) if not devGuard("noclip") then return end NoClipOn = on end, })
+
+RunService.Stepped:Connect(function() if NoClipOn then local char = LocalPlayer.Character if char then for _, part in ipairs(char:GetDescendants()) do if part:IsA("BasePart") then part.CanCollide = false end end end end end)
+
+-- No Fall Damage (placeholder, game-specific) SecMode:AddToggle("VSTAR_NoFallDamage", { Title = "No Fall Damage (Dev)", Default = false, Description = "Per game berbeda, tidak diimplementasi umum", Callback = function(on) if not devGuard("nofall") then return end notify('VSTAR', 'No Fall Damage bersifat game-specific. Tambahkan sesuai game milikmu.', 4) end, })
+
+-- Godmode (placeholder, game-specific) SecMode:AddToggle("VSTAR_Godmode", { Title = "Godmode (Dev)", Default = false, Description = "Per game berbeda, tidak diimplementasi umum", Callback = function(on) if not devGuard("godmode") then return end notify('VSTAR', 'Godmode bersifat game-specific. Tambahkan di server milikmu.', 4) end, })
+
+-- No Gravity (dev) local origGravity = workspace.Gravity SecMode:AddToggle("VSTAR_NoGravity", { Title = "No Gravity (Dev)", Default = false, Description = "Set workspace.Gravity = 0", Callback = function(on) if not devGuard("nogravity") then return end if on then origGravity = workspace.Gravity workspace.Gravity = 0 else workspace.Gravity = origGravity end end, })
+
+
+---
+
+-- MISC > Teleport
+
+local SecTP = TabMisc:AddSection({Title = "Teleport", Description = "Teleport ke pemain lain di tempatmu", Defualt = false, Locked = false})
+
+local function listPlayerNames() local names = {} for _, plr in ipairs(Players:GetPlayers()) do if plr ~= LocalPlayer then table.insert(names, plr.Name) end end table.sort(names) return names end
+
+local CurrentTPTarget = "" local PlayerDropdown = SecTP:AddDropdown("VSTAR_TP_Target", { Title = "Pilih Pemain", Description = "Target teleport", Options = listPlayerNames(), Default = "", PlaceHolder = "Cari nama...", Multiple = false, Callback = function(name) CurrentTPTarget = name end })
+
+SecTP:AddButton({Title = "Refresh List Pemain", Callback = function() PlayerDropdown:Update({Options = listPlayerNames()}) notify('VSTAR', 'Daftar pemain diperbarui.', 2) end})
+
+SecTP:AddButton({Title = "Teleport", Callback = function() if CurrentTPTarget == "" then notify('VSTAR', 'Pilih pemain dulu.', 3); return end local target = Players:FindFirstChild(CurrentTPTarget) local hrp = getHRP() if target and target.Character and hrp then local thrp = target.Character:FindFirstChild("HumanoidRootPart") if thrp then hrp.CFrame = thrp.CFrame + Vector3.new(0, 3, 0) end end end})
+
+
+---
+
+-- MISC > Waypoint
+
+local SecWP = TabMisc:AddSection({Title = "Waypoint", Description = "Simpan & teleport ke lokasi", Defualt = false, Locked = false})
+
+local Waypoints = {} local function rebuildWPOptions() local opts = {} for name,_ in pairs(Waypoints) do table.insert(opts, name) end table.sort(opts) return opts end
+
+local CurrentWP = "" local WpDropdown = SecWP:AddDropdown("VSTAR_WP_List", { Title = "Daftar Waypoint", Description = "Pilih waypoint", Options = rebuildWPOptions(), Default = "", PlaceHolder = "Cari waypoint...", Multiple = false, Callback = function(name) CurrentWP = name end })
+
+SecWP:AddTextbox({ Title = "Nama Waypoint Baru", Default = "", Description = "Masukkan nama untuk lokasi saat ini", PlaceHolder = "cth: Base, Shop, Gunung", TextDisappear = false, Callback = function(txt) local hrp = getHRP(); if not hrp then return end if txt and txt ~= "" then Waypoints[txt] = hrp.CFrame WpDropdown:Update({Options = rebuildWPOptions()}) notify('VSTAR', 'Waypoint tersimpan: '..txt, 2) end end })
+
+SecWP:AddButton({Title = "Teleport ke Waypoint", Callback = function() if CurrentWP == "" then notify('VSTAR','Pilih waypoint dulu',2); return end local cf = Waypoints[CurrentWP] local hrp = getHRP() if cf and hrp then hrp.CFrame = cf end end})
+
+SecWP:AddButton({Title = "Hapus Waypoint", Callback = function() if CurrentWP == "" then notify('VSTAR','Pilih waypoint dulu',2); return end Waypoints[CurrentWP] = nil WpDropdown:Update({Options = rebuildWPOptions()}) notify('VSTAR', 'Waypoint dihapus.', 2) end})
+
+
+---
+
+-- MISC > Other (Chat Spy placeholder)
+
+local SecMiscOther = TabMisc:AddSection({Title = "Other", Description = "Chat Spy placeholder (untuk tempatmu)", Defualt = false, Locked = false}) SecMiscOther:AddParagraph({Title = "Chat Spy", Description = "Tidak disediakan di sini. Jika kamu pemilik tempat, gunakan ChatService di server untuk logging sesuai kebijakan privasi."})
+
+
+---
+
+-- COMBAT > Auto (placeholder), ESP (placeholder)
+
+local SecAuto = TabCombat:AddSection({Title = "Auto", Description = "Auto tembak/aim TIDAK disediakan.", Defualt = false, Locked = false}) SecAuto:AddParagraph({Title = "Auto Shoot/Aim", Description = "Tidak tersedia karena melanggar kebijakan & ToS jika digunakan di server publik."})
+
+local SecESP = TabCombat:AddSection({Title = "Esp", Description = "ESP TIDAK disediakan.", Defualt = false, Locked = false}) SecESP:AddParagraph({Title = "ESP", Description = "Tidak tersedia karena melanggar kebijakan & ToS jika digunakan di server publik."})
+
+-- COMBAT > Other (Full Bright) local SecCombatOther = TabCombat:AddSection({Title = "Other", Description = "Full Bright (client)", Defualt = false, Locked = false})
+
+local fullBrightOn = false local savedBrightness, savedAmbient, savedOutdoor
+
+SecCombatOther:AddToggle("VSTAR_FullBright", { Title = "Full Bright", Default = false, Description = "Terang maksimal (client)", Callback = function(on) fullBrightOn = on if on then savedBrightness = Lighting.Brightness savedAmbient = Lighting.Ambient savedOutdoor = Lighting.OutdoorAmbient Lighting.Brightness = 2 Lighting.Ambient = Color3.new(1,1,1) Lighting.OutdoorAmbient = Color3.new(1,1,1) else if savedBrightness then Lighting.Brightness = savedBrightness end if savedAmbient then Lighting.Ambient = savedAmbient end if savedOutdoor then Lighting.OutdoorAmbient = savedOutdoor end end end, })
+
+
+---
+
+-- SERVER > Server Control
+
+local SecServer = TabServer:AddSection({Title = "Server Control", Description = "Rejoin / Join via ID / Copy JobId", Defualt = false, Locked = false})
+
+SecServer:AddButton({Title = "Rejoin", Callback = function() local placeId = game.PlaceId local jobId = game.JobId pcall(function() TeleportService:TeleportToPlaceInstance(placeId, jobId, LocalPlayer) end) end})
+
+SecServer:AddButton({Title = "Copy Server ID", Callback = function() local ok = pcall(function() if setclipboard then setclipboard(game.JobId) end end) if ok then notify('VSTAR','Server ID disalin.',2) else notify('VSTAR','setclipboard tidak tersedia.',3) end end})
+
+local ServerIdToJoin = "" SecServer:AddTextbox({ Title = "Server ID (JobId)", Default = "", Description = "Isi JobId untuk join", PlaceHolder = "copy-paste JobId di sini", TextDisappear = false, Callback = function(val) ServerIdToJoin = val end })
+
+SecServer:AddButton({Title = "Join via Server ID", Callback = function() if ServerIdToJoin == "" then notify('VSTAR','Masukkan Server ID dulu',2); return end pcall(function() TeleportService:TeleportToPlaceInstance(game.PlaceId, ServerIdToJoin, LocalPlayer) end) end})
+
+-- Hop Server sederhana (tanpa fetch daftar server publik) SecServer:AddParagraph({Title = "Hop Server", Description = "Untuk hop publik yang sesungguhnya biasanya perlu daftar server lewat web request, yang tidak disediakan di sini."})
+
+
+---
+
+-- CONFIG > Configuration (Save/Load)
+
+local SecConfig = TabConfig:AddSection({Title = "Configuration", Description = "Simpan & muat pengaturan", Defualt = false, Locked = false})
+
+FlagsManager:SetLibrary(lib) FlagsManager:SetIgnoreIndexes({}) FlagsManager:SetFolder("VSTAR/" .. tostring(game.PlaceId)) FlagsManager:InitSaveSystem(TabConfig)
+
+
+---
+
+-- Branding Notif
+
+notify('VSTAR', 'Toolkit aktif. Gunakan hanya di tempatmu sendiri.', 4)
+
+                     
