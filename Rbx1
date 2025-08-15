@@ -1,0 +1,185 @@
+local lib = loadstring(game:HttpGet("https://raw.githubusercontent.com/Just3itx/3itx-UI-LIB/refs/heads/main/Lib"))() 
+local FlagsManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/Just3itx/3itx-UI-LIB/refs/heads/main/ConfigManager"))()
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
+local main = lib:Load({
+    Title = 'VSTAR',
+    ToggleButton = "RBXID or GetCustomasset",
+    BindGui = Enum.KeyCode.RightControl,
+})
+
+-- ===== TAB: MAIN =====
+local MainTab = main:AddTab("MAIN")
+main:SelectTab()
+
+local InfoServerSection = MainTab:AddSection({Title = "Info Server"})
+InfoServerSection:AddParagraph({Title = "FPS", Description = "0"})
+InfoServerSection:AddParagraph({Title = "Ping", Description = "0 ms"})
+InfoServerSection:AddParagraph({Title = "Total Waktu Bermain", Description = "00:00:00"})
+InfoServerSection:AddParagraph({Title = "Place ID", Description = tostring(game.PlaceId)})
+InfoServerSection:AddParagraph({Title = "Place Name", Description = game.PlaceId})
+
+local OtherMainSection = MainTab:AddSection({Title = "Other"})
+OtherMainSection:AddToggle("AntiAFK", {
+    Title = "Anti AFK",
+    Default = false,
+    Callback = function(isEnabled)
+        print("Anti AFK:", isEnabled)
+    end
+})
+
+-- ===== TAB: PLAYER =====
+local PlayerTab = main:AddTab("PLAYER")
+
+local MovementSection = PlayerTab:AddSection({Title = "Movement"})
+MovementSection:AddToggle("WalkSpeed", {
+    Title = "Walk Speed",
+    Default = false,
+    Callback = function(enabled)
+        print("Walk Speed:", enabled)
+    end
+})
+MovementSection:AddToggle("HighJump", {
+    Title = "High Jump",
+    Default = false,
+    Callback = function(enabled)
+        print("High Jump:", enabled)
+    end
+})
+MovementSection:AddToggle("InfiniteJump", {
+    Title = "Infinite Jump",
+    Default = false,
+    Callback = function(enabled)
+        print("Infinite Jump:", enabled)
+    end
+})
+
+local ModeSection = PlayerTab:AddSection({Title = "Mode"})
+ModeSection:AddToggle("NoFallDamage", {
+    Title = "No Fall Damage",
+    Default = false,
+    Callback = function(enabled)
+        print("No Fall Damage:", enabled)
+    end
+})
+ModeSection:AddToggle("GodMode", {
+    Title = "God Mode",
+    Default = false,
+    Callback = function(enabled)
+        print("God Mode:", enabled)
+    end
+})
+ModeSection:AddToggle("NoClip", {
+    Title = "No Clip",
+    Default = false,
+    Callback = function(enabled)
+        print("No Clip:", enabled)
+    end
+})
+
+-- ===== TAB: MISC =====
+local MiscTab = main:AddTab("MISC")
+
+local TeleportSection = MiscTab:AddSection({Title = "Teleport"})
+TeleportSection:AddDropdown("TeleportToPlayer", {
+    Title = "Teleport to Player",
+    Description = "Select player",
+    Options = {}, -- nanti bisa diisi daftar pemain
+    Callback = function(playerName)
+        print("Teleport ke:", playerName)
+    end
+})
+TeleportSection:AddButton({
+    Title = "Refresh List",
+    Callback = function()
+        print("Daftar pemain diperbarui")
+    end
+})
+
+local WaypointSection = MiscTab:AddSection({Title = "Waypoint"})
+WaypointSection:AddButton({
+    Title = "Save Lokasi",
+    Callback = function()
+        print("Lokasi disimpan")
+    end
+})
+WaypointSection:AddDropdown("TeleportToWaypoint", {
+    Title = "Teleport ke Lokasi",
+    Options = {}, -- nanti bisa diisi lokasi yang disimpan
+    Callback = function(location)
+        print("Teleport ke lokasi:", location)
+    end
+})
+
+local OtherMiscSection = MiscTab:AddSection({Title = "Other"})
+OtherMiscSection:AddToggle("ESP", {
+    Title = "ESP",
+    Default = false,
+    Callback = function(enabled)
+        print("ESP:", enabled)
+    end
+})
+OtherMiscSection:AddToggle("FullBright", {
+    Title = "Full Bright",
+    Default = false,
+    Callback = function(enabled)
+        print("Full Bright:", enabled)
+    end
+})
+OtherMiscSection:AddButton({
+    Title = "B-Tool",
+    Callback = function()
+        print("B-Tool diaktifkan")
+    end
+})
+OtherMiscSection:AddToggle("ChatSpy", {
+    Title = "Chat Spy",
+    Default = false,
+    Callback = function(enabled)
+        print("Chat Spy:", enabled)
+    end
+})
+
+-- ===== Config Manager =====
+FlagsManager:SetLibrary(lib)
+FlagsManager:SetIgnoreIndexes({})
+FlagsManager:SetFolder("Config/GameName")
+FlagsManager:InitSaveSystem(MainTab)
+
+-- ===== Notification =====
+lib:Notification('Hello', 'Hello, Thanks for using 3itx-UI-Lib',3)
+
+-- ===== Real-time FPS =====
+local frameCount = 0
+local lastTime = tick()
+local fps = 0
+
+RunService.RenderStepped:Connect(function()
+    frameCount = frameCount + 1
+    local currentTime = tick()
+    if currentTime - lastTime >= 1 then
+        fps = frameCount / (currentTime - lastTime)
+        lastTime = currentTime
+        frameCount = 0
+        InfoServerSection:GetElement("FPS").Description = string.format("%.0f", fps)
+    end
+end)
+
+-- ===== Real-time Ping =====
+RunService.RenderStepped:Connect(function()
+    local ping = math.floor(LocalPlayer:GetNetworkPing() * 1000) -- convert to ms
+    InfoServerSection:GetElement("Ping").Description = ping .. " ms"
+end)
+
+-- ===== Real-time Total Waktu Bermain =====
+local startTime = tick()
+RunService.RenderStepped:Connect(function()
+    local elapsed = tick() - startTime
+    local hours = math.floor(elapsed / 3600)
+    local minutes = math.floor((elapsed % 3600) / 60)
+    local seconds = math.floor(elapsed % 60)
+    local timeStr = string.format("%02d:%02d:%02d", hours, minutes, seconds)
+    InfoServerSection:GetElement("Total Waktu Bermain").Description = timeStr
+end)
