@@ -1,0 +1,574 @@
+-- =====================================================
+-- VSTAR - Full Final (Safe & Modular)
+-- Uses 3itx-UI-LIB (UI lib must be accessible)
+-- Paste to executor (Synapse/ArceusX/Script-Ware/etc.)
+-- =====================================================
+
+-- Safe load UI libs
+local ok_lib, lib = pcall(function()
+    return loadstring(game:HttpGet("https://raw.githubusercontent.com/Just3itx/3itx-UI-LIB/refs/heads/main/Lib"))()
+end)
+if not ok_lib or not lib then
+    return warn("VSTAR: Failed to load 3itx UI library. Check internet/executor.")
+end
+
+local ok_cfg, FlagsManager = pcall(function()
+    return loadstring(game:HttpGet("https://raw.githubusercontent.com/Just3itx/3itx-UI-LIB/refs/heads/main/ConfigManager"))()
+end)
+if not ok_cfg then FlagsManager = nil end
+
+-- Services
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TeleportService = game:GetService("TeleportService")
+local MarketplaceService = game:GetService("MarketplaceService")
+local HttpService = game:GetService("HttpService")
+local Lighting = game:GetService("Lighting")
+local Stats = game:GetService("Stats")
+local CoreGui = game:GetService("CoreGui")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+
+-- Helpers
+local function safeNotify(t,c,d) pcall(function() lib:Notification(t or "VSTAR", c or "", d or 3) end) end
+local function safeGetHumanoid(ch) return (ch and ch:FindFirstChildOfClass("Humanoid")) or nil end
+local function safeGetHRP(ch)
+    if not ch then return nil end
+    return ch:FindFirstChild("HumanoidRootPart") or ch:FindFirstChild("Torso") or ch:FindFirstChild("UpperTorso") or ch:FindFirstChild("LowerTorso")
+end
+local function fmtTime(sec)
+    sec = math.max(0, math.floor(sec))
+    local h = math.floor(sec/3600); local m = math.floor((sec%3600)/60); local s = sec%60
+    if h>0 then return string.format("%02d:%02d:%02d",h,m,s) end
+    return string.format("%02d:%02d",m,s)
+end
+
+-- State & flags
+local joinTick = tick()
+local FLAGS = {
+    antiAFK = false,
+    -- PLAYER Movement
+    ws_on = false, ws_val = 16,
+    hj_on = false, hj_val = 50,
+    infjump = false,
+    -- Mode
+    noclip = false, nofalldmg = false, godmode = false, nogravity = false,
+    -- MISC
+    chatspy = false,
+    -- Teleport
+    tp_target = nil,
+    -- Waypoints
+    waypoints = {},
+    -- COMBAT
+    auto_shoot = false, esp = false, fullbright = false,
+    -- SERVER
+    auto_reconnect = false, jobid_input = "",
+}
+
+-- Connections for toggles (so we can disconnect)
+local CONN = {
+    antiAFK = nil,
+    infjump = nil,
+    noclip = nil,
+    nofalldmg = nil,
+    chatspy = nil,
+    autoShoot = nil,
+    esp_added = nil,
+    esp_player_conns = {}, -- per-player
+}
+
+-- Save original lighting to restore
+local originalLighting = {}
+pcall(function()
+    originalLighting.Brightness = Lighting.Brightness
+    originalLighting.ClockTime = Lighting.ClockTime
+    originalLighting.Ambient = Lighting.Ambient
+    originalLighting.OutdoorAmbient = Lighting.OutdoorAmbient
+    originalLighting.FogEnd = Lighting.FogEnd
+    originalLighting.GlobalShadows = Lighting.GlobalShadows
+    originalLighting.ColorShift_Bottom = Lighting.ColorShift_Bottom
+    originalLighting.ColorShift_Top = Lighting.ColorShift_Top
+end)
+
+-- UI root
+local main = lib:Load({
+    Title = "VSTAR",
+    ToggleButton = "rbxassetid://0000000",
+    BindGui = Enum.KeyCode.RightControl,
+})
+
+-- Create tabs
+local Tab_MAIN = main:AddTab("MAIN")
+local Tab_PLAYER = main:AddTab("PLAYER")
+local Tab_MISC = main:AddTab("MISC")
+local Tab_COMBAT = main:AddTab("COMBAT")
+local Tab_SERVER = main:AddTab("SERVER")
+local Tab_CONFIG = main:AddTab("Config")
+main:SelectTab("MAIN")
+
+-- === MAIN: sections ===
+local SecInfo = Tab_MAIN:AddSection({Title="Info server", Description=""})
+local SecAFK  = Tab_MAIN:AddSection({Title="Anti AFK", Description=""})
+
+-- Info paragraphs
+local p_fps = SecInfo:AddParagraph({Title="FPS (realtime)", Description="0"})
+local p_ping = SecInfo:AddParagraph({Title="Ping", Description="0 ms"})
+local p_count = SecInfo:AddParagraph({Title="Player count", Description="0"})
+local p_dur = SecInfo:AddParagraph({Title="Durasi sejak join", Description="00:00"})
+local p_name = SecInfo:AddParagraph({Title="Place name", Description="Loading..."})
+local p_id = SecInfo:AddParagraph({Title="Place id", Description=tostring(game.PlaceId)})
+
+-- Fill place name async
+task.spawn(function()
+    local ok, info = pcall(function() return MarketplaceService:GetProductInfo(game.PlaceId) end)
+    pcall(function() p_name:SetDescription((ok and info and info.Name) and info.Name or "Unknown") end)
+end)
+
+-- ping getter (best-effort)
+local function getPing()
+    local v = 0
+    pcall(function()
+        local item = Stats and Stats.Network and Stats.Network.ServerStatsItem and Stats.Network.ServerStatsItem["Data Ping"]
+        if item and item.GetValue then v = math.floor(item:GetValue()) end
+    end)
+    return v
+end
+
+-- update info loop (lightweight)
+RunService.RenderStepped:Connect(function(dt)
+    if dt and dt>0 then pcall(function() p_fps:SetDescription(tostring(math.floor(1/dt))) end) end
+    pcall(function() p_ping:SetDescription(tostring(getPing()).." ms") end)
+    pcall(function() p_count:SetDescription(tostring(#Players:GetPlayers())) end)
+    pcall(function() p_dur:SetDescription(fmtTime(tick()-joinTick)) end)
+end)
+
+-- Anti AFK toggle
+SecAFK:AddToggle("VSTAR_AntiAFK", {
+    Title="Anti AFK",
+    Default=false,
+    Callback=function(state)
+        FLAGS.antiAFK = state
+        if state then
+            -- try disable getconnections to Idled
+            pcall(function()
+                local g = getconnections and getconnections(LocalPlayer.Idled)
+                if g then for _,c in ipairs(g) do pcall(function() c:Disable() end) end end
+            end)
+            -- fallback poke VirtualUser periodically
+            if not CONN.antiAFK then
+                CONN.antiAFK = LocalPlayer.Idled:Connect(function()
+                    pcall(function()
+                        local vu = game:GetService("VirtualUser")
+                        vu:Button2Down(Vector2.new(0,0), Workspace.CurrentCamera and Workspace.CurrentCamera.CFrame or CFrame.new())
+                        task.wait(0.7)
+                        vu:Button2Up(Vector2.new(0,0), Workspace.CurrentCamera and Workspace.CurrentCamera.CFrame or CFrame.new())
+                    end)
+                end)
+            end
+            safeNotify("VSTAR","Anti AFK ON",2)
+        else
+            if CONN.antiAFK then CONN.antiAFK:Disconnect(); CONN.antiAFK = nil end
+            safeNotify("VSTAR","Anti AFK OFF",2)
+        end
+    end
+})
+
+-- === PLAYER: Movement & Mode ===
+local SecMovement = Tab_PLAYER:AddSection({Title="Movement", Description=""})
+local SecMode = Tab_PLAYER:AddSection({Title="Mode", Description=""})
+
+-- WalkSpeed toggle + slider
+SecMovement:AddToggle("VSTAR_WS", {
+    Title="WalkSpeed (ON/OFF)", Default=false,
+    Callback=function(s) FLAGS.ws_on = s
+        if not s then
+            pcall(function() local h = safeGetHumanoid(LocalPlayer.Character); if h then h.WalkSpeed = 16 end end)
+        else
+            pcall(function() local h = safeGetHumanoid(LocalPlayer.Character); if h then h.WalkSpeed = FLAGS.ws_val end end)
+        end
+    end
+})
+SecMovement:AddSlider("VSTAR_WS_Val", {
+    Title="WalkSpeed (0-200)", Default=16, Min=0, Max=200, Increment=1,
+    Callback=function(v) FLAGS.ws_val = v; if FLAGS.ws_on then pcall(function() local h=safeGetHumanoid(LocalPlayer.Character); if h then h.WalkSpeed=v end end) end
+end})
+
+-- High jump toggle + slider
+SecMovement:AddToggle("VSTAR_HJ", {
+    Title="High Jump (ON/OFF)", Default=false,
+    Callback=function(s) FLAGS.hj_on = s
+        if not s then pcall(function() local h=safeGetHumanoid(LocalPlayer.Character); if h then h.JumpPower = 50 end end)
+        else pcall(function() local h=safeGetHumanoid(LocalPlayer.Character); if h then h.JumpPower = FLAGS.hj_val end end) end
+    end
+})
+SecMovement:AddSlider("VSTAR_HJ_Val", {
+    Title="JumpPower (0-300)", Default=50, Min=0, Max=300, Increment=1,
+    Callback=function(v) FLAGS.hj_val = v; if FLAGS.hj_on then pcall(function() local h=safeGetHumanoid(LocalPlayer.Character); if h then h.JumpPower=v end end) end
+end})
+
+-- Infinite jump toggle
+SecMovement:AddToggle("VSTAR_InfJ", {
+    Title="Infinite Jump", Default=false,
+    Callback=function(s)
+        FLAGS.infjump = s
+        if s and not CONN.infjump then
+            CONN.infjump = UserInputService.JumpRequest:Connect(function()
+                pcall(function() local h=safeGetHumanoid(LocalPlayer.Character); if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end end)
+            end)
+        elseif not s and CONN.infjump then
+            CONN.infjump:Disconnect(); CONN.infjump = nil
+        end
+    end
+})
+
+-- Reapply stats after spawn
+LocalPlayer.CharacterAdded:Connect(function(char)
+    task.wait(0.5)
+    pcall(function()
+        local h = safeGetHumanoid(char)
+        if h then
+            if FLAGS.ws_on then h.WalkSpeed = FLAGS.ws_val else h.WalkSpeed = 16 end
+            if FLAGS.hj_on then h.JumpPower = FLAGS.hj_val else h.JumpPower = 50 end
+        end
+    end)
+end)
+
+-- Mode: NoClip
+SecMode:AddToggle("VSTAR_NoClip", {
+    Title="No Clip", Default=false,
+    Callback=function(s)
+        FLAGS.noclip = s
+        if s and not CONN.noclip then
+            CONN.noclip = RunService.Stepped:Connect(function()
+                pcall(function()
+                    local ch = LocalPlayer.Character
+                    if ch then for _,part in ipairs(ch:GetDescendants()) do if part:IsA("BasePart") then part.CanCollide = false end end end
+                end)
+            end)
+            safeNotify("VSTAR","Noclip ON",2)
+        elseif not s and CONN.noclip then
+            CONN.noclip:Disconnect(); CONN.noclip = nil; safeNotify("VSTAR","Noclip OFF",2)
+        end
+    end
+})
+
+-- Mode: No fall damage (attempt)
+SecMode:AddToggle("VSTAR_NoFall", {
+    Title="No Fall Damage", Default=false,
+    Callback=function(s)
+        FLAGS.nofalldmg = s
+        if s and not CONN.nofalldmg then
+            -- attach to Humanoid.StateChanged if available
+            CONN.nofalldmg = LocalPlayer.Character and safeGetHumanoid(LocalPlayer.Character) and safeGetHumanoid(LocalPlayer.Character).StateChanged:Connect(function(_,new)
+                if new == Enum.HumanoidStateType.Freefall then
+                    pcall(function() local h = safeGetHumanoid(LocalPlayer.Character); if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end end)
+                end
+            end)
+            safeNotify("VSTAR","NoFall ON (attempt)",2)
+        elseif not s and CONN.nofalldmg then
+            pcall(function() CONN.nofalldmg:Disconnect() end); CONN.nofalldmg = nil; safeNotify("VSTAR","NoFall OFF",2)
+        end
+    end
+})
+
+-- Mode: Godmode (basic attempt)
+SecMode:AddToggle("VSTAR_God", {
+    Title="Godmode", Default=false,
+    Callback=function(s)
+        FLAGS.godmode = s
+        if s then
+            pcall(function() local h = safeGetHumanoid(LocalPlayer.Character); if h then h.Health = math.huge; h.MaxHealth = math.huge end end)
+            safeNotify("VSTAR","Godmode attempt ON",3)
+        else
+            safeNotify("VSTAR","Godmode attempt OFF (may persist if game blocks restore)",2)
+        end
+    end
+})
+
+-- Mode: No gravity
+SecMode:AddToggle("VSTAR_NoGrav", {
+    Title="No Gravity", Default=false,
+    Callback=function(s)
+        FLAGS.nogravity = s
+        if s then pcall(function() Workspace.Gravity = 0 end); safeNotify("VSTAR","No Gravity ON",2)
+        else pcall(function() Workspace.Gravity = 196.2 end); safeNotify("VSTAR","Gravity restored",2) end
+    end
+})
+
+-- === MISC: Teleport, Waypoint, Other ===
+local SecTeleport = Tab_MISC:AddSection({Title="Teleport", Description=""})
+local SecWaypoint = Tab_MISC:AddSection({Title="Waypoint", Description=""})
+local SecOtherM = Tab_MISC:AddSection({Title="Other", Description=""})
+
+-- Teleport dropdown (best-effort update)
+local tp_dropdown = SecTeleport:AddDropdown("VSTAR_TPD", {
+    Title="Teleport to player", Options = {}, Default = nil, PlaceHolder = "Select player",
+    Multiple = false, Callback = function(v) FLAGS.tp_target = v end
+})
+
+local function refreshPlayersOptions()
+    local opts = {}
+    for _,plr in ipairs(Players:GetPlayers()) do if plr ~= LocalPlayer then table.insert(opts, plr.Name) end end
+    pcall(function()
+        if tp_dropdown and tp_dropdown.SetOptions then tp_dropdown:SetOptions(opts) end
+        if tp_dropdown and tp_dropdown.Options then tp_dropdown.Options = opts end
+    end)
+end
+refreshPlayersOptions()
+Players.PlayerAdded:Connect(refreshPlayersOptions)
+Players.PlayerRemoving:Connect(refreshPlayersOptions)
+
+SecTeleport:AddButton({Title="Refresh Player", Callback=function() refreshPlayersOptions(); safeNotify("VSTAR","Player list refreshed",2) end})
+SecTeleport:AddButton({Title="Teleport", Callback=function()
+    if not FLAGS.tp_target or FLAGS.tp_target == "" then safeNotify("VSTAR","Select a player first",2); return end
+    local p = Players:FindFirstChild(FLAGS.tp_target)
+    if not p or not p.Character then safeNotify("VSTAR","Player not found",2); return end
+    local tgt = safeGetHRP(p.Character); local me = safeGetHRP(LocalPlayer.Character)
+    if tgt and me then pcall(function() me.CFrame = tgt.CFrame + tgt.CFrame.LookVector*2 + Vector3.new(0,3,0) end); safeNotify("VSTAR","Teleported to "..FLAGS.tp_target,2) end
+end})
+
+-- Waypoints
+local wp_dropdown = SecWaypoint:AddDropdown("VSTAR_WPD", {Title="Waypoints", Options = {}, Default = nil, PlaceHolder = "No waypoints", Multiple = false, Callback = function() end})
+local wp_name = current and tostring("WP-"..math.random(100,999)) or ("WP-"..math.random(100,999))
+
+SecWaypoint:AddTextbox({Title="Waypoint name", Default=wp_name, PlaceHolder="Name", TextDisappear=false, Callback=function(v) if v and v~="" then wp_name = tostring(v) end end})
+SecWaypoint:AddButton({Title="Save current location", Callback=function()
+    local hrp = safeGetHRP(LocalPlayer.Character)
+    if not hrp then safeNotify("VSTAR","Your HRP not found",2); return end
+    table.insert(FLAGS.waypoints, {name = wp_name, cframe = hrp.CFrame})
+    -- rebuild
+    local list = {}
+    for _,w in ipairs(FLAGS.waypoints) do table.insert(list, w.name) end
+    pcall(function() if wp_dropdown and wp_dropdown.SetOptions then wp_dropdown:SetOptions(list) end end)
+    safeNotify("VSTAR","Waypoint saved: "..wp_name,2)
+end})
+SecWaypoint:AddButton({Title="Teleport to selected waypoint", Callback=function()
+    local chosen = nil
+    pcall(function() if wp_dropdown then chosen = wp_dropdown.Value or wp_dropdown:GetValue and wp_dropdown:GetValue() end end)
+    if not chosen or chosen=="" then safeNotify("VSTAR","Select waypoint",2); return end
+    for _,w in ipairs(FLAGS.waypoints) do if w.name == chosen then local hrp = safeGetHRP(LocalPlayer.Character); if hrp then pcall(function() hrp.CFrame = w.cframe end) end safeNotify("VSTAR","Teleported to "..chosen,2); return end end
+    safeNotify("VSTAR","Waypoint not found",2)
+end})
+SecWaypoint:AddButton({Title="Delete selected waypoint", Callback=function()
+    local chosen = nil
+    pcall(function() if wp_dropdown then chosen = wp_dropdown.Value or wp_dropdown:GetValue and wp_dropdown:GetValue() end end)
+    if not chosen or chosen=="" then safeNotify("VSTAR","Select waypoint",2); return end
+    for i,w in ipairs(FLAGS.waypoints) do if w.name == chosen then table.remove(FLAGS.waypoints,i); safeNotify("VSTAR","Deleted "..chosen,2); local list={}; for _,x in ipairs(FLAGS.waypoints) do table.insert(list,x.name) end; pcall(function() if wp_dropdown and wp_dropdown.SetOptions then wp_dropdown:SetOptions(list) end end); return end end
+    safeNotify("VSTAR","Waypoint not found",2)
+end})
+SecWaypoint:AddButton({Title="Clear all waypoints", Callback=function() FLAGS.waypoints = {}; pcall(function() if wp_dropdown and wp_dropdown.SetOptions then wp_dropdown:SetOptions({}) end end); safeNotify("VSTAR","Cleared all waypoints",2) end})
+SecWaypoint:AddButton({Title="List waypoints (console)", Callback=function() for i,w in ipairs(FLAGS.waypoints) do if rconsoleprint then rconsoleprint(("[%d] %s\n"):format(i,w.name)) end end; safeNotify("VSTAR","Waypoints printed to console",2) end})
+
+-- Other: Chat spy
+SecOtherM:AddToggle("VSTAR_ChatSpy", {Title="Chat Spy", Default=false, Callback=function(s)
+    FLAGS.chatspy = s
+    if s and not CONN.chatspy then
+        task.spawn(function()
+            local ok, events = pcall(function() return ReplicatedStorage:WaitForChild("DefaultChatSystemChatEvents",5) end)
+            if ok and events then
+                local OnMessage = events:FindFirstChild("OnMessageDoneFiltering")
+                if OnMessage and OnMessage.OnClientEvent then
+                    CONN.chatspy = OnMessage.OnClientEvent:Connect(function(msgData, channel)
+                        if FLAGS.chatspy and msgData and msgData.FromSpeaker and msgData.Message then
+                            if rconsoleprint then rconsoleprint(("[%s] %s: %s\n"):format(channel or "Chat", msgData.FromSpeaker, msgData.Message)) end
+                        end
+                    end)
+                end
+            end
+        end)
+        safeNotify("VSTAR","ChatSpy ON (console)",2)
+    elseif not s and CONN.chatspy then
+        pcall(function() CONN.chatspy:Disconnect() end); CONN.chatspy = nil; safeNotify("VSTAR","ChatSpy OFF",2)
+    end
+end})
+
+-- === COMBAT: Auto, ESP, Other ===
+local SecAuto = Tab_COMBAT:AddSection({Title="Auto", Description=""})
+local SecESP = Tab_COMBAT:AddSection({Title="Esp", Description=""})
+local SecOtherC = Tab_COMBAT:AddSection({Title="Other", Description=""})
+
+-- Auto shoot toggle
+SecAuto:AddToggle("VSTAR_AutoShoot", {Title="Auto Shoot (crosshair)", Default=false, Callback=function(s)
+    FLAGS.auto_shoot = s
+    if s and not CONN.autoShoot then
+        CONN.autoShoot = RunService.RenderStepped:Connect(function()
+            if not FLAGS.auto_shoot then return end
+            local cam = Workspace.CurrentCamera
+            if not cam then return end
+            local origin = cam.CFrame.Position
+            local dir = cam.CFrame.LookVector * 2000
+            local params = RaycastParams.new()
+            params.FilterType = Enum.RaycastFilterType.Blacklist
+            params.FilterDescendantsInstances = {LocalPlayer.Character}
+            local res = Workspace:Raycast(origin, dir, params)
+            if res and res.Instance then
+                local model = res.Instance:FindFirstAncestorOfClass("Model")
+                if model then
+                    local hum = model:FindFirstChildOfClass("Humanoid")
+                    if hum then
+                        local plr = Players:GetPlayerFromCharacter(model)
+                        if plr and plr ~= LocalPlayer then
+                            pcall(function()
+                                if mouse1click then mouse1click() else local vim = game:GetService("VirtualInputManager"); vim:SendMouseButtonEvent(0,0,0,true,game,0); vim:SendMouseButtonEvent(0,0,0,false,game,0) end
+                            end)
+                        end
+                    end
+                end
+            end
+        end)
+        safeNotify("VSTAR","Auto Shoot ON",2)
+    elseif not s and CONN.autoShoot then
+        CONN.autoShoot:Disconnect(); CONN.autoShoot = nil; safeNotify("VSTAR","Auto Shoot OFF",2)
+    end
+end})
+
+-- ESP toggle (Highlight)
+local esp_instances = {} -- player -> highlight instance
+SecESP:AddToggle("VSTAR_ESP", {Title="ESP Players", Default=false, Callback=function(s)
+    FLAGS.esp = s
+    if s then
+        -- create highlights for existing players
+        for _,plr in ipairs(Players:GetPlayers()) do
+            if plr ~= LocalPlayer then
+                pcall(function()
+                    if plr.Character and not esp_instances[plr] then
+                        local h = Instance.new("Highlight")
+                        h.Name = "VSTAR_ESP"
+                        h.Adornee = plr.Character
+                        h.FillTransparency = 0.5
+                        h.OutlineTransparency = 0
+                        h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                        h.Parent = CoreGui
+                        esp_instances[plr] = h
+                    end
+                end)
+                -- connect respawn
+                CONN.esp_player_conns[plr] = plr.CharacterAdded:Connect(function()
+                    task.wait(0.2)
+                    if FLAGS.esp then
+                        pcall(function()
+                            if plr.Character and not esp_instances[plr] then
+                                local h = Instance.new("Highlight")
+                                h.Name = "VSTAR_ESP"
+                                h.Adornee = plr.Character
+                                h.FillTransparency = 0.5
+                                h.OutlineTransparency = 0
+                                h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                                h.Parent = CoreGui
+                                esp_instances[plr] = h
+                            end
+                        end)
+                    end
+                end)
+            end
+        end
+        -- player added
+        CONN.esp_added = Players.PlayerAdded:Connect(function(plr)
+            if plr ~= LocalPlayer and FLAGS.esp then
+                task.wait(0.2)
+                pcall(function()
+                    if plr.Character and not esp_instances[plr] then
+                        local h = Instance.new("Highlight")
+                        h.Name = "VSTAR_ESP"
+                        h.Adornee = plr.Character
+                        h.FillTransparency = 0.5
+                        h.OutlineTransparency = 0
+                        h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                        h.Parent = CoreGui
+                        esp_instances[plr] = h
+                    end
+                end)
+                CONN.esp_player_conns[plr] = plr.CharacterAdded:Connect(function()
+                    task.wait(0.2)
+                    if FLAGS.esp then
+                        pcall(function()
+                            if plr.Character and not esp_instances[plr] then
+                                local h = Instance.new("Highlight")
+                                h.Name = "VSTAR_ESP"
+                                h.Adornee = plr.Character
+                                h.FillTransparency = 0.5
+                                h.OutlineTransparency = 0
+                                h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                                h.Parent = CoreGui
+                                esp_instances[plr] = h
+                            end
+                        end)
+                    end
+                end)
+            end
+        end)
+        safeNotify("VSTAR","ESP ON",2)
+    else
+        -- destroy highlights
+        for plr,h in pairs(esp_instances) do pcall(function() h:Destroy() end); esp_instances[plr] = nil end
+        -- disconnect player conns
+        for k,conn in pairs(CONN.esp_player_conns) do pcall(function() conn:Disconnect() end); CONN.esp_player_conns[k] = nil end
+        if CONN.esp_added then CONN.esp_added:Disconnect(); CONN.esp_added = nil end
+        safeNotify("VSTAR","ESP OFF",2)
+    end
+end})
+
+-- FullBright toggle
+SecOtherC:AddToggle("VSTAR_FullBright", {Title="Full Bright", Default=false, Callback=function(s)
+    FLAGS.fullbright = s
+    if s then
+        pcall(function()
+            Lighting.Brightness = 2
+            Lighting.ClockTime = 14
+            Lighting.FogEnd = 1e6
+            Lighting.GlobalShadows = false
+            Lighting.Ambient = Color3.new(1,1,1)
+            if Lighting.OutdoorAmbient then Lighting.OutdoorAmbient = Color3.new(1,1,1) end
+        end)
+        safeNotify("VSTAR","FullBright ON",2)
+    else
+        pcall(function() for k,v in pairs(originalLighting) do if v~=nil then Lighting[k]=v end end end)
+        safeNotify("VSTAR","FullBright OFF",2)
+    end
+end})
+
+-- === SERVER: Auto reconnect, Rejoin, Server hop, Copy id, Join via id ===
+local SecServer = Tab_SERVER and Tab_SERVER:AddSection({Title="Server control", Description=""}) or SecServer
+
+SecServer:AddToggle("VSTAR_AutoReconnect", {Title="Auto reconnect", Default=false, Callback=function(s) FLAGS.auto_reconnect = s; safeNotify("VSTAR", s and "AutoReconnect ON" or "AutoReconnect OFF",2) end})
+
+-- auto-detect disconnection UI and teleport back (best-effort)
+task.spawn(function()
+    CoreGui.DescendantAdded:Connect(function(obj)
+        if not FLAGS.auto_reconnect then return end
+        local n = tostring(obj.Name):lower()
+        if n:find("error") or n:find("disconnected") or n:find("teleport") then
+            task.wait(1)
+            pcall(function() TeleportService:Teleport(game.PlaceId) end)
+        end
+    end)
+end)
+
+SecServer:AddButton({Title="Rejoin", Callback=function() pcall(function() TeleportService:Teleport(game.PlaceId, LocalPlayer) end) end})
+SecServer:AddButton({Title="Server Hop", Callback=function()
+    pcall(function()
+        if TeleportService.TeleportAsync then
+            TeleportService:TeleportAsync(game.PlaceId, {LocalPlayer}, Instance.new("TeleportOptions"))
+        else
+            TeleportService:Teleport(game.PlaceId)
+        end
+    end)
+end})
+SecServer:AddButton({Title="Copy Server ID", Callback=function() pcall(function() if setclipboard then setclipboard(game.JobId) safeNotify("VSTAR","Server ID copied",2) else if rconsoleprint then rconsoleprint("Server ID: "..game.JobId.."\n") end safeNotify("VSTAR","Clipboard not supported; printed to console",3) end end) end})
+SecServer:AddTextbox({Title="Join via Server ID", Default="", PlaceHolder="Enter JobId", TextDisappear=false, Callback=function(v) FLAGS.jobid_input = tostring(v or "") end})
+SecServer:AddButton({Title="Join via ID", Callback=function() if not FLAGS.jobid_input or FLAGS.jobid_input=="" then safeNotify("VSTAR","Enter JobId first",2); return end pcall(function() TeleportService:TeleportToPlaceInstance(game.PlaceId, FLAGS.jobid_input, LocalPlayer) end) end})
+
+-- Config (FlagsManager)
+if FlagsManager then
+    pcall(function()
+        FlagsManager:SetLibrary(lib)
+        FlagsManager:SetIgnoreIndexes({})
+        FlagsManager:SetFolder("Config/VSTAR")
+        FlagsManager:InitSaveSystem(Tab_CONFIG)
+    end)
+end
+
+safeNotify("VSTAR", "VSTAR Full Final loaded — toggles ready", 4)
+-- End
