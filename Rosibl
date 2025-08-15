@@ -1,0 +1,526 @@
+-- // VSTAR UI — Full Script
+
+-- ========== Load Library ==========
+local lib = loadstring(game:HttpGet("https://raw.githubusercontent.com/Just3itx/3itx-UI-LIB/refs/heads/main/Lib"))()
+local FlagsManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/Just3itx/3itx-UI-LIB/refs/heads/main/ConfigManager"))()
+
+-- ========== Services ==========
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
+local Stats = game:GetService("Stats")
+local MarketplaceService = game:GetService("MarketplaceService")
+local TeleportService = game:GetService("TeleportService")
+
+-- ========== Create UI Root ==========
+local main = lib:Load({
+    Title = 'VSTAR',
+    ToggleButton = "RBXID or GetCustomasset",
+    BindGui = Enum.KeyCode.RightControl,
+})
+
+------------------------------------------------------
+-- TAB: MAIN
+------------------------------------------------------
+local TabMain = main:AddTab("MAIN")
+
+-- Section: Info server
+local SecInfoServer = TabMain:AddSection({
+    Title = "Info server",
+    Description = "Informasi tentang server",
+    Defualt = false,
+    Locked = false
+})
+
+-- INFO SERVER (Realtime, ringan)
+local joinTime = os.clock()
+local infoParagraph = SecInfoServer:AddParagraph({
+    Title = "Server Info",
+    Description = "Loading..."
+})
+
+-- FPS via dt (tanpa :Wait() di dalam RenderStepped)
+local lastFps = 0
+RunService.RenderStepped:Connect(function(dt)
+    if dt > 0 then
+        lastFps = math.floor(1 / dt)
+    end
+end)
+
+-- Ambil place name sekali (hindari yield tiap frame)
+local placeName = "Unknown"
+pcall(function()
+    placeName = MarketplaceService:GetProductInfo(game.PlaceId).Name
+end)
+local placeId = game.PlaceId
+
+-- Loop update info tiap 0.5s
+task.spawn(function()
+    while true do
+        -- Ping: coba Stats Data Ping, kalau tidak ada pakai GetNetworkPing()
+        local pingMs = 0
+        local ok, value = pcall(function()
+            local item = Stats.Network.ServerStatsItem["Data Ping"]
+            return item and item:GetValue()
+        end)
+        if ok and value then
+            pingMs = math.floor(value)
+        else
+            local ok2, sec = pcall(function()
+                return LocalPlayer:GetNetworkPing()
+            end)
+            if ok2 and sec then pingMs = math.floor(sec * 1000) end
+        end
+
+        local playerCount = #Players:GetPlayers()
+        local dur = math.floor(os.clock() - joinTime)
+        local h = dur // 3600
+        local m = (dur % 3600) // 60
+        local s = dur % 60
+
+        local text = string.format(
+            "FPS: %d\nPing: %d ms\nPlayers: %d\nDurasi: %02d:%02d:%02d\nPlace: %s\nPlace ID: %d",
+            lastFps, pingMs, playerCount, h, m, s, placeName, placeId
+        )
+
+        if infoParagraph.Set then
+            infoParagraph:Set({ Title = "Server Info", Description = text })
+        elseif infoParagraph.SetDescription then
+            infoParagraph:SetDescription(text)
+        elseif infoParagraph.Update then
+            infoParagraph:Update(text)
+        end
+
+        task.wait(0.5)
+    end
+end)
+
+-- Section: Anti AFK
+local SecAntiAFK = TabMain:AddSection({
+    Title = "Anti AFK",
+    Description = "Cegah kick AFK",
+    Defualt = false,
+    Locked = false
+})
+
+local antiAfkConn
+SecAntiAFK:AddToggle("AntiAFKToggle", {
+    Title = "Anti AFK",
+    Default = false,
+    Description = "Aktif/nonaktif anti AFK",
+    Callback = function(enabled)
+        if enabled and not antiAfkConn then
+            local vu = game:GetService("VirtualUser")
+            antiAfkConn = LocalPlayer.Idled:Connect(function()
+                vu:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+                task.wait(1)
+                vu:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+            end)
+            lib:Notification("VSTAR", "Anti AFK Aktif", 2)
+        elseif not enabled and antiAfkConn then
+            antiAfkConn:Disconnect()
+            antiAfkConn = nil
+            lib:Notification("VSTAR", "Anti AFK Nonaktif", 2)
+        end
+    end
+})
+
+------------------------------------------------------
+-- TAB: PLAYER
+------------------------------------------------------
+local TabPlayer = main:AddTab("PLAYER")
+
+-- Section: Movement
+local SecMovement = TabPlayer:AddSection({
+    Title = "Movement",
+    Description = "Pengaturan gerakan",
+    Defualt = false,
+    Locked = false
+})
+
+-- Walk Speed
+local walkSpeedEnabled = false
+local walkSpeedValue = 16
+SecMovement:AddToggle("WalkSpeedToggle", {
+    Title = "Walk Speed",
+    Default = false,
+    Description = "Aktifkan custom WalkSpeed",
+    Callback = function(state)
+        walkSpeedEnabled = state
+        local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if not state and hum then
+            hum.WalkSpeed = 16
+        end
+    end
+})
+SecMovement:AddSlider("WalkSpeedSlider", {
+    Title = "Walk Speed Value",
+    Min = 0, Max = 200, Default = 16, Increment = 1,
+    Callback = function(value) walkSpeedValue = value end
+})
+RunService.RenderStepped:Connect(function()
+    if walkSpeedEnabled then
+        local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if hum then hum.WalkSpeed = walkSpeedValue end
+    end
+end)
+
+-- High Jump
+local highJumpEnabled = false
+local highJumpValue = 50
+SecMovement:AddToggle("HighJumpToggle", {
+    Title = "High Jump",
+    Default = false,
+    Description = "Aktifkan lompatan tinggi",
+    Callback = function(state) highJumpEnabled = state end
+})
+SecMovement:AddSlider("HighJumpSlider", {
+    Title = "High Jump Power",
+    Min = 0, Max = 300, Default = 50, Increment = 1,
+    Callback = function(value) highJumpValue = value end
+})
+UIS.JumpRequest:Connect(function()
+    if highJumpEnabled then
+        local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if hum then hum.JumpPower = highJumpValue end
+    end
+end)
+
+-- Infinite Jump
+local infiniteJumpEnabled = false
+SecMovement:AddToggle("InfiniteJumpToggle", {
+    Title = "Infinite Jump",
+    Default = false,
+    Description = "Lompat tanpa batas",
+    Callback = function(state) infiniteJumpEnabled = state end
+})
+UIS.JumpRequest:Connect(function()
+    if infiniteJumpEnabled then
+        local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+    end
+end)
+
+-- Section: Mode
+local SecMode = TabPlayer:AddSection({
+    Title = "Mode",
+    Description = "Pengaturan mode pemain",
+    Defualt = false,
+    Locked = false
+})
+
+-- No Clip
+local noclipEnabled = false
+SecMode:AddToggle("NoClipToggle", {
+    Title = "No Clip",
+    Default = false,
+    Description = "Lewati tembok/objek",
+    Callback = function(state)
+        noclipEnabled = state
+        if not state and LocalPlayer.Character then
+            for _, part in ipairs(LocalPlayer.Character:GetDescendants()) do
+                if part:IsA("BasePart") then part.CanCollide = true end
+            end
+        end
+    end
+})
+RunService.Stepped:Connect(function()
+    if noclipEnabled and LocalPlayer.Character then
+        for _, part in ipairs(LocalPlayer.Character:GetDescendants()) do
+            if part:IsA("BasePart") then part.CanCollide = false end
+        end
+    end
+end)
+
+-- No Fall Damage
+local noFallDamageEnabled = false
+local noFallConn
+local function bindNoFall(char)
+    local hum = char:WaitForChild("Humanoid")
+    noFallConn = hum.StateChanged:Connect(function(_, new)
+        if noFallDamageEnabled and new == Enum.HumanoidStateType.Freefall then
+            hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics)
+        end
+    end)
+end
+if LocalPlayer.Character then bindNoFall(LocalPlayer.Character) end
+LocalPlayer.CharacterAdded:Connect(function(char)
+    if noFallConn then noFallConn:Disconnect() end
+    bindNoFall(char)
+end)
+SecMode:AddToggle("NoFallDamageToggle", {
+    Title = "No Fall Damage",
+    Default = false,
+    Description = "Hapus damage jatuh",
+    Callback = function(state) noFallDamageEnabled = state end
+})
+
+-- Godmode
+local godmodeEnabled = false
+SecMode:AddToggle("GodmodeToggle", {
+    Title = "Godmode",
+    Default = false,
+    Description = "Tidak bisa mati (klien)",
+    Callback = function(state)
+        godmodeEnabled = state
+        local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if hum then
+            if state then
+                hum.Health = math.huge
+            else
+                hum.Health = hum.MaxHealth
+            end
+        end
+    end
+})
+RunService.Stepped:Connect(function()
+    if godmodeEnabled then
+        local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if hum then hum.Health = math.huge end
+    end
+end)
+LocalPlayer.CharacterAdded:Connect(function(char)
+    if godmodeEnabled then
+        local hum = char:WaitForChild("Humanoid")
+        task.defer(function() hum.Health = math.huge end)
+    end
+end)
+
+------------------------------------------------------
+-- TAB: MISC
+------------------------------------------------------
+local TabMisc = main:AddTab("MISC")
+
+-- Section: Teleport (ke player lain)
+local SecTeleport = TabMisc:AddSection({
+    Title = "Teleport",
+    Description = "Teleport ke player lain",
+    Defualt = false,
+    Locked = false
+})
+
+local playerList = {}
+local selectedPlayer = nil
+local teleportDropdown -- handle dropdown utk update opsi
+
+local function buildPlayerList()
+    table.clear(playerList)
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer then
+            table.insert(playerList, plr.Name)
+        end
+    end
+end
+local function updateTeleportDropdown()
+    if teleportDropdown and (teleportDropdown.Set or teleportDropdown.SetOptions) then
+        if teleportDropdown.Set then
+            teleportDropdown:Set({ Options = playerList, Default = "" })
+        else
+            teleportDropdown.SetOptions(playerList)
+        end
+    else
+        -- fallback: buat dropdown sekali (untuk lib yg tidak support update dinamis)
+        -- (abaikan bila sudah dibuat)
+    end
+end
+
+buildPlayerList()
+teleportDropdown = SecTeleport:AddDropdown("TeleportPlayerDropdown", {
+    Title = "Pilih Player",
+    Options = playerList,
+    Default = "",
+    PlaceHolder = "Pilih player",
+    Multiple = false,
+    Callback = function(selected) selectedPlayer = selected end
+})
+
+SecTeleport:AddButton({
+    Title = "Refresh Player",
+    Callback = function()
+        buildPlayerList()
+        updateTeleportDropdown()
+        lib:Notification("Teleport", "Daftar player diperbarui", 2)
+    end
+})
+
+SecTeleport:AddButton({
+    Title = "Teleport ke Player",
+    Callback = function()
+        if not selectedPlayer or selectedPlayer == "" then
+            lib:Notification("Teleport", "Pilih player dulu", 2)
+            return
+        end
+        local target = Players:FindFirstChild(selectedPlayer)
+        local char = target and target.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        local myhrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if hrp and myhrp then
+            myhrp.CFrame = hrp.CFrame + Vector3.new(0, 3, 0)
+        else
+            lib:Notification("Teleport", "Gagal teleport (player tidak valid)", 2)
+        end
+    end
+})
+
+-- Section: Waypoint (multi-save)
+local SecWaypoint = TabMisc:AddSection({
+    Title = "Waypoint",
+    Description = "Simpan & teleport ke waypoint",
+    Defualt = false,
+    Locked = false
+})
+
+local waypoints = {}      -- { ["Nama"] = Vector3 }
+local selectedWaypoint = nil
+local waypointDropdown    -- handle dropdown
+
+local function waypointNames()
+    local names = {}
+    for name, _ in pairs(waypoints) do table.insert(names, name) end
+    table.sort(names)
+    return names
+end
+
+local function refreshWaypointDropdown()
+    local names = waypointNames()
+    if waypointDropdown and (waypointDropdown.Set or waypointDropdown.SetOptions) then
+        if waypointDropdown.Set then
+            waypointDropdown:Set({ Options = names, Default = "" })
+        else
+            waypointDropdown.SetOptions(names)
+        end
+    else
+        -- initial create
+        waypointDropdown = SecWaypoint:AddDropdown("WaypointDropdown", {
+            Title = "Pilih Waypoint",
+            Options = names,
+            Default = "",
+            PlaceHolder = "Pilih waypoint",
+            Multiple = false,
+            Callback = function(selected) selectedWaypoint = selected end
+        })
+    end
+end
+
+-- tombol Save Waypoint (pakai nama otomatis; bisa diubah ke dialog input kalau lib-mu ada Input)
+SecWaypoint:AddButton({
+    Title = "Save Waypoint",
+    Callback = function()
+        local myhrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if not myhrp then
+            lib:Notification("Waypoint", "Karakter belum siap", 2)
+            return
+        end
+        local name = "WP_" .. tostring(math.random(1000,9999))
+        waypoints[name] = myhrp.Position
+        refreshWaypointDropdown()
+        lib:Notification("Waypoint", "Disimpan: "..name, 2)
+    end
+})
+
+SecWaypoint:AddButton({
+    Title = "Teleport ke Waypoint",
+    Callback = function()
+        if not selectedWaypoint or not waypoints[selectedWaypoint] then
+            lib:Notification("Waypoint", "Pilih waypoint dulu", 2)
+            return
+        end
+        local myhrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if myhrp then
+            myhrp.CFrame = CFrame.new(waypoints[selectedWaypoint])
+        end
+    end
+})
+
+SecWaypoint:AddButton({
+    Title = "Hapus Waypoint",
+    Callback = function()
+        if not selectedWaypoint or not waypoints[selectedWaypoint] then
+            lib:Notification("Waypoint", "Tidak ada waypoint dipilih", 2)
+            return
+        end
+        waypoints[selectedWaypoint] = nil
+        selectedWaypoint = nil
+        refreshWaypointDropdown()
+        lib:Notification("Waypoint", "Waypoint dihapus", 2)
+    end
+})
+
+-- init dropdown pertama kali
+refreshWaypointDropdown()
+
+-- Section: Other (Chat Spy)
+local SecOther = TabMisc:AddSection({
+    Title = "Other",
+    Description = "Fitur tambahan",
+    Defualt = false,
+    Locked = false
+})
+
+local chatSpyEnabled = false
+local chatConns = {}
+
+local function connectPlayerChat(plr)
+    -- metode universal: gunakan event Chatted per-player
+    local c = plr.Chatted:Connect(function(msg)
+        if chatSpyEnabled and plr ~= LocalPlayer then
+            print(string.format("[ChatSpy] %s: %s", plr.Name, msg))
+        end
+    end)
+    chatConns[plr] = c
+end
+local function disconnectPlayerChat(plr)
+    if chatConns[plr] then
+        chatConns[plr]:Disconnect()
+        chatConns[plr] = nil
+    end
+end
+-- Hook existing players
+for _, p in ipairs(Players:GetPlayers()) do
+    if p ~= LocalPlayer then connectPlayerChat(p) end
+end
+-- Handle player join/leave
+Players.PlayerAdded:Connect(function(p) if p ~= LocalPlayer and chatSpyEnabled then connectPlayerChat(p) end end)
+Players.PlayerRemoving:Connect(function(p) disconnectPlayerChat(p) end)
+
+SecOther:AddToggle("ChatSpyToggle", {
+    Title = "Chat Spy",
+    Default = false,
+    Description = "Lihat chat semua pemain di output",
+    Callback = function(state)
+        chatSpyEnabled = state
+        if not state then
+            for plr, conn in pairs(chatConns) do
+                if conn then conn:Disconnect() end
+                chatConns[plr] = nil
+            end
+            lib:Notification("ChatSpy", "Nonaktif", 2)
+        else
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= LocalPlayer then connectPlayerChat(p) end
+            end
+            lib:Notification("ChatSpy", "Aktif (lihat Output)", 2)
+        end
+    end
+})
+
+------------------------------------------------------
+-- TAB: SERVER
+------------------------------------------------------
+local TabServer = main:AddTab("SERVER")
+TabServer:AddSection({ Title = "Server control", Description = "Tambahkan kontrol server di sini" })
+
+------------------------------------------------------
+-- TAB: CONFIG
+------------------------------------------------------
+local TabConfig = main:AddTab("Config")
+TabConfig:AddSection({ Title = "Configuration", Description = "Simpan / Muat pengaturan" })
+
+FlagsManager:SetLibrary(lib)
+FlagsManager:SetIgnoreIndexes({})
+FlagsManager:SetFolder("Config/GameName")
+FlagsManager:InitSaveSystem(TabConfig)
+
+-- Notifikasi awal
+lib:Notification('VSTAR', 'Hello, Thanks for using VSTAR UI', 3)
